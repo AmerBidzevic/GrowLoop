@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GrowLoop</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="auth-panel" id="authPanel">
+        <div>
+          <p class="eyebrow">GrowLoop</p>
+          <h1>Build habits that keep paying you back.</h1>
+          <p class="subtle">Register, complete onboarding, create habits, and earn XP for today's wins.</p>
+        </div>
+
+        <div class="tabs" role="tablist">
+          <button class="tab active" id="showLogin" type="button">Login</button>
+          <button class="tab" id="showRegister" type="button">Register</button>
+        </div>
+
+        <form class="form" id="loginForm">
+          <input type="email" name="email" placeholder="Email" required>
+          <input type="password" name="password" placeholder="Password" required>
+          <button type="submit">Login</button>
+        </form>
+
+        <form class="form hidden" id="registerForm">
+          <input type="text" name="username" placeholder="Username" required>
+          <input type="email" name="email" placeholder="Email" required>
+          <input type="password" name="password" placeholder="Password" required>
+          <button type="submit">Create account</button>
+        </form>
+
+        <p class="message" id="authMessage" aria-live="polite"></p>
+      </section>
+
+      <section class="dashboard hidden" id="dashboard">
+        <header class="dashboard-header">
+          <div>
+            <p class="eyebrow">Today's Habits</p>
+            <h2 id="welcomeTitle">Welcome</h2>
+          </div>
+          <div class="xp-card">
+            <span>XP</span>
+            <strong id="xpValue">0</strong>
+          </div>
+        </header>
+
+        <section class="onboarding" id="onboardingPanel">
+          <h3>Onboarding</h3>
+          <form class="grid-form" id="onboardingForm">
+            <select name="goals" required>
+              <option value="">Primary goal</option>
+              <option>Health</option>
+              <option>Learning</option>
+              <option>Productivity</option>
+            </select>
+            <select name="schedule" required>
+              <option value="">Daily schedule</option>
+              <option>Morning focused</option>
+              <option>Afternoon focused</option>
+              <option>Evening focused</option>
+            </select>
+            <select name="habit_count" required>
+              <option value="">Habit load</option>
+              <option value="1">1 habit</option>
+              <option value="2">2 habits</option>
+              <option value="3">3 habits</option>
+            </select>
+            <button type="submit">Save onboarding</button>
+          </form>
+        </section>
+
+        <section class="habit-composer">
+          <h3>Add Habit</h3>
+          <form class="grid-form" id="habitForm">
+            <input name="name" placeholder="Habit name" required>
+            <select name="category" required>
+              <option value="">Category</option>
+              <option>Health</option>
+              <option>Mindfulness</option>
+              <option>Learning</option>
+              <option>Productivity</option>
+            </select>
+            <select name="frequency" required>
+              <option value="">Frequency</option>
+              <option>Daily</option>
+              <option>Weekdays</option>
+              <option>Weekly</option>
+            </select>
+            <input name="target_time" type="time" required>
+            <select name="difficulty" required>
+              <option value="">Difficulty</option>
+              <option>Easy</option>
+              <option>Medium</option>
+              <option>Hard</option>
+            </select>
+            <input name="reminder" type="time" aria-label="Reminder time">
+            <button type="submit">Save habit</button>
+          </form>
+        </section>
+
+        <section class="habits">
+          <div class="section-title">
+            <h3>Core Loop</h3>
+            <button class="ghost" id="logoutButton" type="button">Logout</button>
+          </div>
+          <div class="habit-list" id="habitList"></div>
+          <p class="message" id="dashboardMessage" aria-live="polite"></p>
+        </section>
+      </section>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>
+

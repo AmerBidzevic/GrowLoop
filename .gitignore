@@ -1,0 +1,5 @@
+backend/growloop.sqlite3
+backend/*.log
+docx-render/
+__pycache__/
+*.pyc
