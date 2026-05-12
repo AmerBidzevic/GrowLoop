@@ -12,7 +12,7 @@
         <div>
           <p class="eyebrow">GrowLoop</p>
           <h1>Build habits that keep paying you back.</h1>
-          <p class="subtle">Register, complete onboarding, create habits, and earn XP for today's wins.</p>
+          <p class="subtle">Track routines, earn XP, unlock achievements, and get smart guidance.</p>
         </div>
 
         <div class="tabs" role="tablist">
@@ -39,80 +39,133 @@
       <section class="dashboard hidden" id="dashboard">
         <header class="dashboard-header">
           <div>
-            <p class="eyebrow">Today's Habits</p>
+            <p class="eyebrow">GrowLoop Dashboard</p>
             <h2 id="welcomeTitle">Welcome</h2>
           </div>
-          <div class="xp-card">
-            <span>XP</span>
-            <strong id="xpValue">0</strong>
+          <div class="stats-strip">
+            <div class="metric">
+              <span>XP</span>
+              <strong id="xpValue">0</strong>
+            </div>
+            <div class="metric">
+              <span>Level</span>
+              <strong id="levelValue">1</strong>
+            </div>
+            <div class="metric wide">
+              <span>Next level</span>
+              <div class="progress"><span id="xpProgress"></span></div>
+            </div>
           </div>
         </header>
 
-        <section class="onboarding" id="onboardingPanel">
-          <h3>Onboarding</h3>
-          <form class="grid-form" id="onboardingForm">
-            <select name="goals" required>
-              <option value="">Primary goal</option>
-              <option>Health</option>
-              <option>Learning</option>
-              <option>Productivity</option>
-            </select>
-            <select name="schedule" required>
-              <option value="">Daily schedule</option>
-              <option>Morning focused</option>
-              <option>Afternoon focused</option>
-              <option>Evening focused</option>
-            </select>
-            <select name="habit_count" required>
-              <option value="">Habit load</option>
-              <option value="1">1 habit</option>
-              <option value="2">2 habits</option>
-              <option value="3">3 habits</option>
-            </select>
-            <button type="submit">Save onboarding</button>
-          </form>
+        <nav class="app-nav" aria-label="GrowLoop sections">
+          <button class="nav-button active" data-view="habits" type="button">Habits</button>
+          <button class="nav-button" data-view="analytics" type="button">Analytics</button>
+          <button class="nav-button" data-view="achievements" type="button">Achievements</button>
+          <button class="ghost" id="logoutButton" type="button">Logout</button>
+        </nav>
+
+        <section class="view" id="habitsView">
+          <section class="onboarding" id="onboardingPanel">
+            <div class="section-title">
+              <h3>Onboarding</h3>
+              <span class="pill">Personalization</span>
+            </div>
+            <form class="grid-form" id="onboardingForm">
+              <select name="goals" required>
+                <option value="">Primary goal</option>
+                <option>Health</option>
+                <option>Learning</option>
+                <option>Productivity</option>
+              </select>
+              <select name="schedule" required>
+                <option value="">Daily schedule</option>
+                <option>Morning focused</option>
+                <option>Afternoon focused</option>
+                <option>Evening focused</option>
+              </select>
+              <select name="habit_count" required>
+                <option value="">Habit load</option>
+                <option value="1">1 habit</option>
+                <option value="2">2 habits</option>
+                <option value="3">3 habits</option>
+                <option value="4">4 habits</option>
+                <option value="5">5 habits</option>
+              </select>
+              <button type="submit">Save onboarding</button>
+            </form>
+          </section>
+
+          <section class="habit-composer">
+            <div class="section-title">
+              <h3 id="habitFormTitle">Add Habit</h3>
+              <button class="ghost hidden" id="cancelEditButton" type="button">Cancel edit</button>
+            </div>
+            <form class="grid-form" id="habitForm">
+              <input type="hidden" name="id" id="habitId">
+              <input name="name" placeholder="Habit name" required>
+              <input name="description" placeholder="Short description">
+              <select name="category" required>
+                <option value="">Category</option>
+                <option>Health</option>
+                <option>Mindfulness</option>
+                <option>Learning</option>
+                <option>Productivity</option>
+              </select>
+              <select name="frequency" required>
+                <option value="">Frequency</option>
+                <option>Daily</option>
+                <option>Weekdays</option>
+                <option>Weekly</option>
+              </select>
+              <input name="target_time" type="time" required>
+              <select name="difficulty" required>
+                <option value="">Difficulty</option>
+                <option>Easy</option>
+                <option>Medium</option>
+                <option>Hard</option>
+              </select>
+              <input name="reminder" type="time" aria-label="Reminder time">
+              <button type="submit" id="habitSubmitButton">Save habit</button>
+            </form>
+          </section>
+
+          <section class="habits">
+            <div class="section-title">
+              <h3>Habit List</h3>
+              <label class="toggle-line"><input type="checkbox" id="showPaused"> Show paused</label>
+            </div>
+            <div class="habit-list" id="habitList"></div>
+          </section>
         </section>
 
-        <section class="habit-composer">
-          <h3>Add Habit</h3>
-          <form class="grid-form" id="habitForm">
-            <input name="name" placeholder="Habit name" required>
-            <select name="category" required>
-              <option value="">Category</option>
-              <option>Health</option>
-              <option>Mindfulness</option>
-              <option>Learning</option>
-              <option>Productivity</option>
-            </select>
-            <select name="frequency" required>
-              <option value="">Frequency</option>
-              <option>Daily</option>
-              <option>Weekdays</option>
-              <option>Weekly</option>
-            </select>
-            <input name="target_time" type="time" required>
-            <select name="difficulty" required>
-              <option value="">Difficulty</option>
-              <option>Easy</option>
-              <option>Medium</option>
-              <option>Hard</option>
-            </select>
-            <input name="reminder" type="time" aria-label="Reminder time">
-            <button type="submit">Save habit</button>
-          </form>
-        </section>
-
-        <section class="habits">
+        <section class="view hidden" id="analyticsView">
           <div class="section-title">
-            <h3>Core Loop</h3>
-            <button class="ghost" id="logoutButton" type="button">Logout</button>
+            <h3>Analytics</h3>
+            <button class="ghost" id="refreshAnalytics" type="button">Refresh</button>
           </div>
-          <div class="habit-list" id="habitList"></div>
-          <p class="message" id="dashboardMessage" aria-live="polite"></p>
+          <div class="analytics-grid" id="analyticsGrid"></div>
         </section>
+
+        <section class="view hidden" id="achievementsView">
+          <div class="section-title">
+            <h3>Achievements</h3>
+            <span class="pill">Progress rewards</span>
+          </div>
+          <div class="achievement-list" id="achievementList"></div>
+        </section>
+
+        <section class="details-panel hidden" id="detailsPanel">
+          <div class="section-title">
+            <h3 id="detailsTitle">Habit Details</h3>
+            <button class="ghost" id="closeDetailsButton" type="button">Close</button>
+          </div>
+          <div id="detailsContent"></div>
+        </section>
+
+        <p class="message" id="dashboardMessage" aria-live="polite"></p>
       </section>
     </main>
     <script src="app.js"></script>
   </body>
 </html>
-

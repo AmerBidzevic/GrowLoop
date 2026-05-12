@@ -1,26 +1,41 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 import json
 import mimetypes
+import os
 import re
 
-from database import get_connection, hash_password, initialize_database, row_to_dict, verify_password
+from database import initialize_database
+from repository import GrowLoopRepository
+from services import (
+    AchievementService,
+    AnalyticsService,
+    AuthService,
+    HabitService,
+    enrich_profile,
+)
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = ROOT_DIR / "frontend"
-HOST = "localhost"
-PORT = 8000
+HOST = os.environ.get("HOST", "0.0.0.0")
+PORT = int(os.environ.get("PORT", "8000"))
 
 
 class GrowLoopHandler(BaseHTTPRequestHandler):
+    repo = GrowLoopRepository()
+    auth_service = AuthService(repo)
+    habit_service = HabitService(repo)
+    analytics_service = AnalyticsService(repo)
+    achievement_service = AchievementService(repo)
+
     def do_GET(self):
-        path = urlparse(self.path).path
-        if path.startswith("/api/"):
-            self.handle_api_get(path)
+        parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/"):
+            self.handle_api_get(parsed.path, parse_qs(parsed.query))
         else:
-            self.serve_static(path)
+            self.serve_static(parsed.path)
 
     def do_POST(self):
         self.handle_api_write("POST")
@@ -31,25 +46,24 @@ class GrowLoopHandler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         self.handle_api_write("DELETE")
 
-    def handle_api_get(self, path):
+    def handle_api_get(self, path, query):
+        if path == "/api/health":
+            self.send_json({"status": "ok"})
+            return
+
+        if path == "/api/profile":
+            user_id = self.require_user_id()
+            if user_id is None:
+                return
+            self.send_json(enrich_profile(self.repo.get_user(user_id)))
+            return
+
         if path == "/api/habits":
             user_id = self.require_user_id()
             if user_id is None:
                 return
-            with get_connection() as conn:
-                habits = conn.execute(
-                    """
-                    SELECT h.*,
-                           CASE WHEN hc.id IS NULL THEN 0 ELSE 1 END AS completed_today
-                    FROM habits h
-                    LEFT JOIN habit_completions hc
-                        ON hc.habit_id = h.id AND hc.completed_on = CURRENT_DATE
-                    WHERE h.user_id = ? AND h.is_active = 1
-                    ORDER BY h.created_at DESC
-                    """,
-                    (user_id,),
-                ).fetchall()
-            self.send_json([row_to_dict(habit) for habit in habits])
+            include_inactive = query.get("include_inactive", ["0"])[0] == "1"
+            self.send_json(self.habit_service.list_habits(user_id, include_inactive))
             return
 
         habit_match = re.fullmatch(r"/api/habits/(\d+)", path)
@@ -57,52 +71,41 @@ class GrowLoopHandler(BaseHTTPRequestHandler):
             user_id = self.require_user_id()
             if user_id is None:
                 return
-            habit_id = int(habit_match.group(1))
-            with get_connection() as conn:
-                habit = conn.execute(
-                    "SELECT * FROM habits WHERE id = ? AND user_id = ?",
-                    (habit_id, user_id),
-                ).fetchone()
+            habit = self.habit_service.get_habit_details(user_id, int(habit_match.group(1)))
             if not habit:
                 self.send_error_json(404, "Habit not found")
                 return
-            self.send_json(row_to_dict(habit))
+            self.send_json(habit)
             return
 
-        if path == "/api/profile":
+        if path == "/api/analytics":
             user_id = self.require_user_id()
             if user_id is None:
                 return
-            with get_connection() as conn:
-                user = conn.execute(
-                    "SELECT id, username, email, xp FROM users WHERE id = ?",
-                    (user_id,),
-                ).fetchone()
-            self.send_json(row_to_dict(user))
+            self.send_json(self.analytics_service.dashboard(user_id))
+            return
+
+        if path == "/api/achievements":
+            user_id = self.require_user_id()
+            if user_id is None:
+                return
+            self.send_json(self.achievement_service.list_with_locked(user_id))
             return
 
         self.send_error_json(404, "API route not found")
 
     def handle_api_write(self, method):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
         data = self.read_json_body() if method in {"POST", "PUT"} else {}
 
         if path == "/api/register" and method == "POST":
-            required = ["username", "email", "password"]
-            if missing_fields(data, required):
+            if missing_fields(data, ["username", "email", "password"]):
                 self.send_error_json(400, "All fields are required")
                 return
-            password_hash, password_salt = hash_password(data["password"])
             try:
-                with get_connection() as conn:
-                    cursor = conn.execute(
-                        """
-                        INSERT INTO users (username, email, password_hash, password_salt)
-                        VALUES (?, ?, ?, ?)
-                        """,
-                        (data["username"], data["email"].lower(), password_hash, password_salt),
-                    )
-                self.send_json({"id": cursor.lastrowid, "message": "Registration successful"}, 201)
+                payload = self.auth_service.register(data)
+                self.send_json(payload, 201)
             except Exception:
                 self.send_error_json(409, "Email already registered")
             return
@@ -111,15 +114,11 @@ class GrowLoopHandler(BaseHTTPRequestHandler):
             if missing_fields(data, ["email", "password"]):
                 self.send_error_json(400, "Enter user data")
                 return
-            with get_connection() as conn:
-                user = conn.execute(
-                    "SELECT * FROM users WHERE email = ?",
-                    (data["email"].lower(),),
-                ).fetchone()
-            if not user or not verify_password(data["password"], user["password_hash"], user["password_salt"]):
+            user = self.auth_service.login(data["email"], data["password"])
+            if not user:
                 self.send_error_json(401, "Invalid email or password")
                 return
-            self.send_json({"id": user["id"], "username": user["username"], "xp": user["xp"]})
+            self.send_json(user)
             return
 
         if path == "/api/onboarding" and method == "POST":
@@ -129,18 +128,7 @@ class GrowLoopHandler(BaseHTTPRequestHandler):
             if missing_fields(data, ["goals", "schedule", "habit_count"]):
                 self.send_error_json(400, "All onboarding questions are required")
                 return
-            with get_connection() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO onboarding_answers (user_id, goals, schedule, habit_count)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(user_id) DO UPDATE SET
-                        goals = excluded.goals,
-                        schedule = excluded.schedule,
-                        habit_count = excluded.habit_count
-                    """,
-                    (user_id, data["goals"], data["schedule"], int(data["habit_count"])),
-                )
+            self.repo.save_onboarding(user_id, data["goals"], data["schedule"], data["habit_count"])
             self.send_json({"message": "Onboarding saved"})
             return
 
@@ -148,28 +136,11 @@ class GrowLoopHandler(BaseHTTPRequestHandler):
             user_id = self.require_user_id()
             if user_id is None:
                 return
-            required = ["name", "category", "frequency", "target_time", "difficulty"]
-            if missing_fields(data, required):
+            if missing_fields(data, ["name", "category", "frequency", "target_time", "difficulty"]):
                 self.send_error_json(400, "All fields except reminder are required")
                 return
-            with get_connection() as conn:
-                cursor = conn.execute(
-                    """
-                    INSERT INTO habits
-                        (user_id, name, category, frequency, target_time, difficulty, reminder)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        user_id,
-                        data["name"],
-                        data["category"],
-                        data["frequency"],
-                        data["target_time"],
-                        data["difficulty"],
-                        data.get("reminder", ""),
-                    ),
-                )
-            self.send_json({"id": cursor.lastrowid, "message": "Habit created"}, 201)
+            habit_id = self.habit_service.create_habit(user_id, data)
+            self.send_json({"id": habit_id, "message": "Habit created"}, 201)
             return
 
         complete_match = re.fullmatch(r"/api/habits/(\d+)/complete", path)
@@ -177,26 +148,28 @@ class GrowLoopHandler(BaseHTTPRequestHandler):
             user_id = self.require_user_id()
             if user_id is None:
                 return
-            habit_id = int(complete_match.group(1))
-            with get_connection() as conn:
-                habit = conn.execute(
-                    "SELECT id FROM habits WHERE id = ? AND user_id = ?",
-                    (habit_id, user_id),
-                ).fetchone()
-                if not habit:
-                    self.send_error_json(404, "Habit not found")
-                    return
-                try:
-                    conn.execute(
-                        "INSERT INTO habit_completions (habit_id, user_id) VALUES (?, ?)",
-                        (habit_id, user_id),
-                    )
-                    conn.execute("UPDATE users SET xp = xp + 10 WHERE id = ?", (user_id,))
-                except Exception:
-                    self.send_error_json(409, "Habit already completed today")
-                    return
-                user = conn.execute("SELECT xp FROM users WHERE id = ?", (user_id,)).fetchone()
-            self.send_json({"message": "Habit completed", "xp": user["xp"]})
+            try:
+                profile = self.habit_service.complete_habit(user_id, int(complete_match.group(1)))
+            except Exception:
+                self.send_error_json(409, "Habit already completed today")
+                return
+            if not profile:
+                self.send_error_json(404, "Habit not found")
+                return
+            self.send_json({"message": "Habit completed", **profile})
+            return
+
+        active_match = re.fullmatch(r"/api/habits/(\d+)/(pause|resume)", path)
+        if active_match and method == "POST":
+            user_id = self.require_user_id()
+            if user_id is None:
+                return
+            is_active = active_match.group(2) == "resume"
+            changed = self.habit_service.set_active(user_id, int(active_match.group(1)), is_active)
+            if changed == 0:
+                self.send_error_json(404, "Habit not found")
+                return
+            self.send_json({"message": "Habit resumed" if is_active else "Habit paused"})
             return
 
         habit_match = re.fullmatch(r"/api/habits/(\d+)", path)
@@ -206,41 +179,18 @@ class GrowLoopHandler(BaseHTTPRequestHandler):
                 return
             habit_id = int(habit_match.group(1))
             if method == "PUT":
-                required = ["name", "category", "frequency", "target_time", "difficulty"]
-                if missing_fields(data, required):
+                if missing_fields(data, ["name", "category", "frequency", "target_time", "difficulty"]):
                     self.send_error_json(400, "All fields except reminder are required")
                     return
-                with get_connection() as conn:
-                    cursor = conn.execute(
-                        """
-                        UPDATE habits
-                        SET name = ?, category = ?, frequency = ?, target_time = ?,
-                            difficulty = ?, reminder = ?
-                        WHERE id = ? AND user_id = ?
-                        """,
-                        (
-                            data["name"],
-                            data["category"],
-                            data["frequency"],
-                            data["target_time"],
-                            data["difficulty"],
-                            data.get("reminder", ""),
-                            habit_id,
-                            user_id,
-                        ),
-                    )
-                if cursor.rowcount == 0:
+                changed = self.habit_service.update_habit(user_id, habit_id, data)
+                if changed == 0:
                     self.send_error_json(404, "Habit not found")
                     return
                 self.send_json({"message": "Habit updated"})
                 return
 
-            with get_connection() as conn:
-                cursor = conn.execute(
-                    "DELETE FROM habits WHERE id = ? AND user_id = ?",
-                    (habit_id, user_id),
-                )
-            if cursor.rowcount == 0:
+            changed = self.habit_service.delete_habit(user_id, habit_id)
+            if changed == 0:
                 self.send_error_json(404, "Habit not found")
                 return
             self.send_json({"message": "Habit deleted"})
@@ -305,4 +255,3 @@ if __name__ == "__main__":
     server = ThreadingHTTPServer((HOST, PORT), GrowLoopHandler)
     print(f"GrowLoop is running at http://{HOST}:{PORT}")
     server.serve_forever()
-

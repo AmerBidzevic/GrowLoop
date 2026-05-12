@@ -1,12 +1,12 @@
 import hashlib
-import os
 import secrets
 import sqlite3
+import os
 from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "growloop.sqlite3"
+DB_PATH = Path(os.environ.get("GROWLOOP_DB_PATH", BASE_DIR / "growloop.sqlite3"))
 
 
 def get_connection():
@@ -44,6 +44,7 @@ def initialize_database():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
                 category TEXT NOT NULL,
                 frequency TEXT NOT NULL,
                 target_time TEXT NOT NULL,
@@ -65,8 +66,36 @@ def initialize_database():
                 FOREIGN KEY (habit_id) REFERENCES habits(id) ON DELETE CASCADE,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS achievements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                code TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                unlocked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (user_id, code),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS notification_preferences (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL UNIQUE,
+                habit_reminders INTEGER NOT NULL DEFAULT 1,
+                inactivity_alerts INTEGER NOT NULL DEFAULT 1,
+                weekly_summary INTEGER NOT NULL DEFAULT 1,
+                monthly_summary INTEGER NOT NULL DEFAULT 1,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
             """
         )
+        ensure_column(conn, "habits", "description", "TEXT NOT NULL DEFAULT ''")
+
+
+def ensure_column(conn, table_name, column_name, definition):
+    columns = [row["name"] for row in conn.execute(f"PRAGMA table_info({table_name})")]
+    if column_name not in columns:
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
 
 def hash_password(password, salt=None):
