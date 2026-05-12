@@ -13,6 +13,7 @@ from services import (
     AnalyticsService,
     AuthService,
     HabitService,
+    RecommendationEngine,
     enrich_profile,
 )
 
@@ -29,6 +30,7 @@ class GrowLoopHandler(BaseHTTPRequestHandler):
     habit_service = HabitService(repo)
     analytics_service = AnalyticsService(repo)
     achievement_service = AchievementService(repo)
+    recommendation_engine = RecommendationEngine()
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -92,6 +94,23 @@ class GrowLoopHandler(BaseHTTPRequestHandler):
             self.send_json(self.achievement_service.list_with_locked(user_id))
             return
 
+        if path == "/api/recommendations":
+            user_id = self.require_user_id()
+            if user_id is None:
+                return
+            habits = self.habit_service.list_habits(user_id, include_inactive=True)
+            completions = self.repo.list_completions(user_id, limit=100)
+            onboarding = self.repo.get_onboarding(user_id)
+            self.send_json(self.recommendation_engine.dashboard(onboarding, habits, completions))
+            return
+
+        if path == "/api/notification-preferences":
+            user_id = self.require_user_id()
+            if user_id is None:
+                return
+            self.send_json(self.repo.get_notification_preferences(user_id))
+            return
+
         self.send_error_json(404, "API route not found")
 
     def handle_api_write(self, method):
@@ -129,7 +148,8 @@ class GrowLoopHandler(BaseHTTPRequestHandler):
                 self.send_error_json(400, "All onboarding questions are required")
                 return
             self.repo.save_onboarding(user_id, data["goals"], data["schedule"], data["habit_count"])
-            self.send_json({"message": "Onboarding saved"})
+            suggestions = self.recommendation_engine.suggestions(self.repo.get_onboarding(user_id))
+            self.send_json({"message": "Onboarding saved", "suggestions": suggestions})
             return
 
         if path == "/api/habits" and method == "POST":
@@ -194,6 +214,13 @@ class GrowLoopHandler(BaseHTTPRequestHandler):
                 self.send_error_json(404, "Habit not found")
                 return
             self.send_json({"message": "Habit deleted"})
+            return
+
+        if path == "/api/notification-preferences" and method == "PUT":
+            user_id = self.require_user_id()
+            if user_id is None:
+                return
+            self.send_json(self.repo.update_notification_preferences(user_id, data))
             return
 
         self.send_error_json(404, "API route not found")

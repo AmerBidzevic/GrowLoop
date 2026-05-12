@@ -28,7 +28,9 @@ document.querySelector("#showLogin").addEventListener("click", () => switchAuthT
 document.querySelector("#showRegister").addEventListener("click", () => switchAuthTab("register"));
 document.querySelector("#logoutButton").addEventListener("click", logout);
 document.querySelector("#onboardingForm").addEventListener("submit", saveOnboarding);
+document.querySelector("#settingsForm").addEventListener("submit", saveSettings);
 document.querySelector("#refreshAnalytics").addEventListener("click", loadAnalytics);
+document.querySelector("#refreshSmart").addEventListener("click", loadSmartCoach);
 document.querySelector("#closeDetailsButton").addEventListener("click", () => detailsPanel.classList.add("hidden"));
 cancelEditButton.addEventListener("click", resetHabitForm);
 showPaused.addEventListener("change", loadHabits);
@@ -59,6 +61,8 @@ function switchView(view) {
   dashboardMessage.textContent = "";
   if (view === "analytics") loadAnalytics();
   if (view === "achievements") loadAchievements();
+  if (view === "smart") loadSmartCoach();
+  if (view === "settings") loadSettings();
 }
 
 async function api(path, options = {}) {
@@ -121,7 +125,7 @@ async function saveOnboarding(event) {
     });
     dashboardMessage.textContent = result.message;
     event.currentTarget.reset();
-    switchView("habits");
+    switchView("smart");
   } catch (error) {
     dashboardMessage.textContent = error.message;
   }
@@ -292,6 +296,53 @@ async function loadAchievements() {
   `).join("");
 }
 
+async function loadSmartCoach() {
+  const data = await api("/api/recommendations");
+  document.querySelector("#coachGrid").innerHTML = `
+    <article class="info-panel"><h4>Burnout detection</h4><p>${escapeHtml(data.burnout_detection)}</p></article>
+    <article class="info-panel"><h4>Habit load</h4><p>${escapeHtml(data.habit_load_recommendation)}</p></article>
+  `;
+  document.querySelector("#suggestionList").innerHTML = data.habit_suggestions.map((item) => `
+    <article class="suggestion">
+      <div>
+        <h4>${escapeHtml(item.name)}</h4>
+        <p>${escapeHtml(item.reason)}</p>
+      </div>
+      <button type="button" data-suggestion='${escapeAttribute(JSON.stringify(item))}'>Accept</button>
+    </article>
+  `).join("");
+}
+
+async function loadSettings() {
+  const prefs = await api("/api/notification-preferences");
+  const form = document.querySelector("#settingsForm");
+  ["habit_reminders", "inactivity_alerts", "weekly_summary", "monthly_summary"].forEach((field) => {
+    form[field].checked = Boolean(prefs[field]);
+  });
+}
+
+async function saveSettings(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = {
+    habit_reminders: form.habit_reminders.checked,
+    inactivity_alerts: form.inactivity_alerts.checked,
+    weekly_summary: form.weekly_summary.checked,
+    monthly_summary: form.monthly_summary.checked,
+  };
+  await api("/api/notification-preferences", { method: "PUT", body: JSON.stringify(payload) });
+  dashboardMessage.textContent = "Notification preferences saved.";
+}
+
+async function acceptSuggestion(data) {
+  const payload = { ...data, description: data.reason, reminder: "" };
+  delete payload.reason;
+  await api("/api/habits", { method: "POST", body: JSON.stringify(payload) });
+  dashboardMessage.textContent = "Suggested habit added.";
+  switchView("habits");
+  await loadHabits();
+}
+
 function metricCard(label, value) {
   return `<article class="info-panel"><h4>${label}</h4><strong>${value}</strong></article>`;
 }
@@ -331,6 +382,10 @@ function escapeHtml(value) {
   })[char]);
 }
 
+function escapeAttribute(value) {
+  return escapeHtml(value).replace(/`/g, "&#096;");
+}
+
 habitList.addEventListener("click", (event) => {
   const completeId = event.target.dataset.complete;
   const deleteId = event.target.dataset.delete;
@@ -345,6 +400,11 @@ habitList.addEventListener("click", (event) => {
     const habit = state.habits.find((item) => String(item.id) === String(toggleId));
     if (habit) toggleHabit(toggleId, habit.is_active);
   }
+});
+
+document.querySelector("#suggestionList").addEventListener("click", (event) => {
+  const suggestion = event.target.dataset.suggestion;
+  if (suggestion) acceptSuggestion(JSON.parse(suggestion));
 });
 
 if (state.user) {

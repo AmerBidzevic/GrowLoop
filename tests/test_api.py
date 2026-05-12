@@ -150,7 +150,7 @@ class GrowLoopApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(any(item["code"] == "FIRST_STEP" and item["unlocked"] for item in achievements))
 
-    def test_analytics(self):
+    def test_analytics_and_recommendations(self):
         user = self.create_user("smart")
         self.request(
             "/api/onboarding",
@@ -163,6 +163,29 @@ class GrowLoopApiTests(unittest.TestCase):
         status, analytics = self.request("/api/analytics", user_id=user["id"])
         self.assertEqual(status, 200)
         self.assertEqual(analytics["total_completions"], 1)
+        status, recommendations = self.request("/api/recommendations", user_id=user["id"])
+        self.assertEqual(status, 200)
+        self.assertGreaterEqual(len(recommendations["habit_suggestions"]), 1)
+
+    def test_notification_preferences(self):
+        user = self.create_user("settings")
+        status, prefs = self.request("/api/notification-preferences", user_id=user["id"])
+        self.assertEqual(status, 200)
+        self.assertEqual(prefs["habit_reminders"], 1)
+        status, updated = self.request(
+            "/api/notification-preferences",
+            "PUT",
+            {
+                "habit_reminders": False,
+                "inactivity_alerts": True,
+                "weekly_summary": False,
+                "monthly_summary": True,
+            },
+            user["id"],
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(updated["habit_reminders"], 0)
+        self.assertEqual(updated["monthly_summary"], 1)
 
 
 if __name__ == "__main__":
