@@ -16,6 +16,7 @@ Current database entities:
 - `habit_completions`
 - `achievements`
 - `notification_preferences`
+- `sessions`
 
 For deployment on Render, SQLite should use a persistent disk. The included `render.yaml` stores the database at `/var/data/growloop.sqlite3`, which keeps the database file outside Render's temporary app folder.
 
@@ -40,6 +41,7 @@ For deployment on Render, SQLite should use a persistent disk. The included `ren
 - Weekly reflection summary
 - Monthly performance summary
 - Notification preferences
+- Browser habit reminders based on saved reminder times
 - Rule-based smart habit suggestions
 - Adaptive difficulty recommendation
 - Burnout detection
@@ -101,6 +103,7 @@ python -m unittest discover -s tests -v
 - Frontend JavaScript uses small functions for API calls, rendering, and UI actions.
 - User input is validated on the backend before database changes.
 - Passwords are stored as PBKDF2 hashes, not plain text.
+- Logged-in API requests use server-side session tokens.
 
 ## Deployment
 

@@ -140,6 +140,13 @@ class GrowLoopHandler(BaseHTTPRequestHandler):
             self.send_json(user)
             return
 
+        if path == "/api/logout" and method == "POST":
+            token = self.get_session_token()
+            if token:
+                self.repo.delete_session(token)
+            self.send_json({"message": "Logged out"})
+            return
+
         if path == "/api/onboarding" and method == "POST":
             user_id = self.require_user_id()
             if user_id is None:
@@ -226,11 +233,28 @@ class GrowLoopHandler(BaseHTTPRequestHandler):
         self.send_error_json(404, "API route not found")
 
     def require_user_id(self):
+        token = self.get_session_token()
+        if token:
+            user = self.repo.find_session_user(token)
+            if user:
+                return user["id"]
+
+        # Backward-compatible fallback for local tests and earlier release branches.
         raw_user_id = self.headers.get("X-User-Id")
-        if not raw_user_id or not raw_user_id.isdigit():
+        if raw_user_id and raw_user_id.isdigit():
+            return int(raw_user_id)
+
+        if not token:
             self.send_error_json(401, "Authentication required")
             return None
-        return int(raw_user_id)
+        self.send_error_json(401, "Session expired or invalid")
+        return None
+
+    def get_session_token(self):
+        auth_header = self.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            return auth_header.removeprefix("Bearer ").strip()
+        return self.headers.get("X-Session-Token", "").strip()
 
     def read_json_body(self):
         length = int(self.headers.get("Content-Length", "0"))

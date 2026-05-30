@@ -2,6 +2,8 @@ const state = {
   user: JSON.parse(localStorage.getItem("growloopUser") || "null"),
   currentView: "habits",
   habits: [],
+  notifiedReminderKeys: new Set(),
+  reminderIntervalId: null,
 };
 
 const authPanel = document.querySelector("#authPanel");
@@ -70,7 +72,7 @@ async function api(path, options = {}) {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      ...(state.user ? { "X-User-Id": state.user.id } : {}),
+      ...(state.user?.session_token ? { "Authorization": `Bearer ${state.user.session_token}` } : {}),
       ...(options.headers || {}),
     },
   });
@@ -357,19 +359,63 @@ function updateProfile() {
 async function showDashboard() {
   authPanel.classList.add("hidden");
   dashboard.classList.remove("hidden");
+  const sessionToken = state.user?.session_token;
   state.user = await api("/api/profile");
+  if (sessionToken) {
+    state.user.session_token = sessionToken;
+  }
   localStorage.setItem("growloopUser", JSON.stringify(state.user));
   updateProfile();
   dashboardMessage.textContent = "";
   switchView("habits");
   await loadHabits();
+  await setupReminderNotifications();
 }
 
-function logout() {
+async function logout() {
+  try {
+    await api("/api/logout", { method: "POST", body: "{}" });
+  } catch (_error) {
+    // The local logout should still work if the server session already expired.
+  }
   state.user = null;
   localStorage.removeItem("growloopUser");
   dashboard.classList.add("hidden");
   authPanel.classList.remove("hidden");
+}
+
+async function setupReminderNotifications() {
+  if (!state.user || state.reminderIntervalId) return;
+  if (!("Notification" in window)) return;
+  if (Notification.permission === "default") {
+    await Notification.requestPermission();
+  }
+  state.reminderIntervalId = window.setInterval(checkDueReminders, 30000);
+  await checkDueReminders();
+}
+
+async function checkDueReminders() {
+  if (!state.user || Notification.permission !== "granted") return;
+  let prefs;
+  try {
+    prefs = await api("/api/notification-preferences");
+  } catch (_error) {
+    return;
+  }
+  if (!prefs.habit_reminders) return;
+  const now = new Date();
+  const current = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const today = now.toISOString().slice(0, 10);
+  state.habits
+    .filter((habit) => habit.is_active && habit.reminder === current && !habit.completed_today)
+    .forEach((habit) => {
+      const key = `${today}-${habit.id}-${current}`;
+      if (state.notifiedReminderKeys.has(key)) return;
+      state.notifiedReminderKeys.add(key);
+      new Notification("GrowLoop habit reminder", {
+        body: `Time for: ${habit.name}`,
+      });
+    });
 }
 
 function escapeHtml(value) {

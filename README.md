@@ -19,6 +19,7 @@ The current release contains the main GrowLoop functionality that we planned for
 - Achievements
 - Analytics with weekly and monthly summaries
 - Notification preferences
+- Browser reminder notifications based on saved habit reminder times
 - Smart recommendation logic for suggestions, burnout detection, adaptive difficulty, and habit load guidance
 - Responsive frontend
 - 5 automated backend/API tests
@@ -59,6 +60,7 @@ python -m unittest discover -s tests -v
 
 - `POST /api/register`
 - `POST /api/login`
+- `POST /api/logout`
 - `POST /api/onboarding`
 - `GET /api/habits`
 - `POST /api/habits`
@@ -90,8 +92,11 @@ GrowLoop uses SQLite. These are the main entities:
 - `habit_completions`
 - `achievements`
 - `notification_preferences`
+- `sessions`
 
 For Render deployment, `render.yaml` configures a persistent disk and sets `GROWLOOP_DB_PATH=/var/data/growloop.sqlite3`, so the SQLite file is stored outside the temporary application folder.
+
+Security note: passwords are stored as PBKDF2 hashes, and logged-in API calls use server-side session tokens.
 
 ## Render Deployment
 

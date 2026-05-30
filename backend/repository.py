@@ -1,4 +1,5 @@
 from database import get_connection, row_to_dict
+import hashlib
 
 
 class GrowLoopRepository:
@@ -31,6 +32,34 @@ class GrowLoopRepository:
                     (user_id,),
                 ).fetchone()
             )
+
+    def create_session(self, user_id, token, expires_at):
+        token_hash = hash_token(token)
+        with get_connection() as conn:
+            conn.execute(
+                "INSERT INTO sessions (user_id, token_hash, expires_at) VALUES (?, ?, ?)",
+                (user_id, token_hash, expires_at),
+            )
+
+    def find_session_user(self, token):
+        token_hash = hash_token(token)
+        with get_connection() as conn:
+            return row_to_dict(
+                conn.execute(
+                    """
+                    SELECT u.id, u.username, u.email, u.xp, u.created_at
+                    FROM sessions s
+                    JOIN users u ON u.id = s.user_id
+                    WHERE s.token_hash = ? AND s.expires_at > CURRENT_TIMESTAMP
+                    """,
+                    (token_hash,),
+                ).fetchone()
+            )
+
+    def delete_session(self, token):
+        token_hash = hash_token(token)
+        with get_connection() as conn:
+            conn.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
 
     def save_onboarding(self, user_id, goals, schedule, habit_count):
         with get_connection() as conn:
@@ -239,3 +268,7 @@ class GrowLoopRepository:
             return row_to_dict(
                 conn.execute("SELECT * FROM notification_preferences WHERE user_id = ?", (user_id,)).fetchone()
             )
+
+
+def hash_token(token):
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
