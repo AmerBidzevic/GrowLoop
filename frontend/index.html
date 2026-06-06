@@ -62,6 +62,8 @@
           <button class="nav-button active" data-view="habits" type="button">Habits</button>
           <button class="nav-button" data-view="analytics" type="button">Analytics</button>
           <button class="nav-button" data-view="achievements" type="button">Achievements</button>
+          <button class="nav-button" data-view="smart" type="button">Smart Coach</button>
+          <button class="nav-button" data-view="settings" type="button">Settings</button>
           <button class="ghost" id="logoutButton" type="button">Logout</button>
         </nav>
 
@@ -153,6 +155,29 @@
             <span class="pill">Progress rewards</span>
           </div>
           <div class="achievement-list" id="achievementList"></div>
+        </section>
+
+        <section class="view hidden" id="smartView">
+          <div class="section-title">
+            <h3>Smart Coach</h3>
+            <button class="ghost" id="refreshSmart" type="button">Refresh</button>
+          </div>
+          <div class="coach-grid" id="coachGrid"></div>
+          <div class="suggestion-list" id="suggestionList"></div>
+        </section>
+
+        <section class="view hidden" id="settingsView">
+          <div class="section-title">
+            <h3>Notification Settings</h3>
+            <span class="pill">Preferences</span>
+          </div>
+          <form class="settings-form" id="settingsForm">
+            <label><input type="checkbox" name="habit_reminders"> Habit reminders</label>
+            <label><input type="checkbox" name="inactivity_alerts"> Inactivity alerts</label>
+            <label><input type="checkbox" name="weekly_summary"> Weekly summaries</label>
+            <label><input type="checkbox" name="monthly_summary"> Monthly summaries</label>
+            <button type="submit">Save settings</button>
+          </form>
         </section>
 
         <section class="details-panel hidden" id="detailsPanel">

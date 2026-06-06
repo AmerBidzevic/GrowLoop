@@ -2,6 +2,8 @@ const state = {
   user: JSON.parse(localStorage.getItem("growloopUser") || "null"),
   currentView: "habits",
   habits: [],
+  notifiedReminderKeys: new Set(),
+  reminderIntervalId: null,
 };
 
 const authPanel = document.querySelector("#authPanel");
@@ -28,7 +30,9 @@ document.querySelector("#showLogin").addEventListener("click", () => switchAuthT
 document.querySelector("#showRegister").addEventListener("click", () => switchAuthTab("register"));
 document.querySelector("#logoutButton").addEventListener("click", logout);
 document.querySelector("#onboardingForm").addEventListener("submit", saveOnboarding);
+document.querySelector("#settingsForm").addEventListener("submit", saveSettings);
 document.querySelector("#refreshAnalytics").addEventListener("click", loadAnalytics);
+document.querySelector("#refreshSmart").addEventListener("click", loadSmartCoach);
 document.querySelector("#closeDetailsButton").addEventListener("click", () => detailsPanel.classList.add("hidden"));
 cancelEditButton.addEventListener("click", resetHabitForm);
 showPaused.addEventListener("change", loadHabits);
@@ -59,6 +63,8 @@ function switchView(view) {
   dashboardMessage.textContent = "";
   if (view === "analytics") loadAnalytics();
   if (view === "achievements") loadAchievements();
+  if (view === "smart") loadSmartCoach();
+  if (view === "settings") loadSettings();
 }
 
 async function api(path, options = {}) {
@@ -66,7 +72,7 @@ async function api(path, options = {}) {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      ...(state.user ? { "X-User-Id": state.user.id } : {}),
+      ...(state.user?.session_token ? { "Authorization": `Bearer ${state.user.session_token}` } : {}),
       ...(options.headers || {}),
     },
   });
@@ -114,14 +120,15 @@ async function login(event) {
 
 async function saveOnboarding(event) {
   event.preventDefault();
+  const form = event.currentTarget;
   try {
     const result = await api("/api/onboarding", {
       method: "POST",
       body: JSON.stringify(formToJson(event.currentTarget)),
     });
     dashboardMessage.textContent = result.message;
-    event.currentTarget.reset();
-    switchView("habits");
+    form.reset();
+    switchView("smart");
   } catch (error) {
     dashboardMessage.textContent = error.message;
   }
@@ -292,6 +299,53 @@ async function loadAchievements() {
   `).join("");
 }
 
+async function loadSmartCoach() {
+  const data = await api("/api/recommendations");
+  document.querySelector("#coachGrid").innerHTML = `
+    <article class="info-panel"><h4>Burnout detection</h4><p>${escapeHtml(data.burnout_detection)}</p></article>
+    <article class="info-panel"><h4>Habit load</h4><p>${escapeHtml(data.habit_load_recommendation)}</p></article>
+  `;
+  document.querySelector("#suggestionList").innerHTML = data.habit_suggestions.map((item) => `
+    <article class="suggestion">
+      <div>
+        <h4>${escapeHtml(item.name)}</h4>
+        <p>${escapeHtml(item.reason)}</p>
+      </div>
+      <button type="button" data-suggestion='${escapeAttribute(JSON.stringify(item))}'>Accept</button>
+    </article>
+  `).join("");
+}
+
+async function loadSettings() {
+  const prefs = await api("/api/notification-preferences");
+  const form = document.querySelector("#settingsForm");
+  ["habit_reminders", "inactivity_alerts", "weekly_summary", "monthly_summary"].forEach((field) => {
+    form[field].checked = Boolean(prefs[field]);
+  });
+}
+
+async function saveSettings(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const payload = {
+    habit_reminders: form.habit_reminders.checked,
+    inactivity_alerts: form.inactivity_alerts.checked,
+    weekly_summary: form.weekly_summary.checked,
+    monthly_summary: form.monthly_summary.checked,
+  };
+  await api("/api/notification-preferences", { method: "PUT", body: JSON.stringify(payload) });
+  dashboardMessage.textContent = "Notification preferences saved.";
+}
+
+async function acceptSuggestion(data) {
+  const payload = { ...data, description: data.reason, reminder: "" };
+  delete payload.reason;
+  await api("/api/habits", { method: "POST", body: JSON.stringify(payload) });
+  dashboardMessage.textContent = "Suggested habit added.";
+  switchView("habits");
+  await loadHabits();
+}
+
 function metricCard(label, value) {
   return `<article class="info-panel"><h4>${label}</h4><strong>${value}</strong></article>`;
 }
@@ -306,19 +360,63 @@ function updateProfile() {
 async function showDashboard() {
   authPanel.classList.add("hidden");
   dashboard.classList.remove("hidden");
+  const sessionToken = state.user?.session_token;
   state.user = await api("/api/profile");
+  if (sessionToken) {
+    state.user.session_token = sessionToken;
+  }
   localStorage.setItem("growloopUser", JSON.stringify(state.user));
   updateProfile();
   dashboardMessage.textContent = "";
   switchView("habits");
   await loadHabits();
+  await setupReminderNotifications();
 }
 
-function logout() {
+async function logout() {
+  try {
+    await api("/api/logout", { method: "POST", body: "{}" });
+  } catch (_error) {
+    // The local logout should still work if the server session already expired.
+  }
   state.user = null;
   localStorage.removeItem("growloopUser");
   dashboard.classList.add("hidden");
   authPanel.classList.remove("hidden");
+}
+
+async function setupReminderNotifications() {
+  if (!state.user || state.reminderIntervalId) return;
+  if (!("Notification" in window)) return;
+  if (Notification.permission === "default") {
+    await Notification.requestPermission();
+  }
+  state.reminderIntervalId = window.setInterval(checkDueReminders, 30000);
+  await checkDueReminders();
+}
+
+async function checkDueReminders() {
+  if (!state.user || Notification.permission !== "granted") return;
+  let prefs;
+  try {
+    prefs = await api("/api/notification-preferences");
+  } catch (_error) {
+    return;
+  }
+  if (!prefs.habit_reminders) return;
+  const now = new Date();
+  const current = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const today = now.toISOString().slice(0, 10);
+  state.habits
+    .filter((habit) => habit.is_active && habit.reminder === current && !habit.completed_today)
+    .forEach((habit) => {
+      const key = `${today}-${habit.id}-${current}`;
+      if (state.notifiedReminderKeys.has(key)) return;
+      state.notifiedReminderKeys.add(key);
+      new Notification("GrowLoop habit reminder", {
+        body: `Time for: ${habit.name}`,
+      });
+    });
 }
 
 function escapeHtml(value) {
@@ -329,6 +427,10 @@ function escapeHtml(value) {
     '"': "&quot;",
     "'": "&#039;",
   })[char]);
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value).replace(/`/g, "&#096;");
 }
 
 habitList.addEventListener("click", (event) => {
@@ -345,6 +447,11 @@ habitList.addEventListener("click", (event) => {
     const habit = state.habits.find((item) => String(item.id) === String(toggleId));
     if (habit) toggleHabit(toggleId, habit.is_active);
   }
+});
+
+document.querySelector("#suggestionList").addEventListener("click", (event) => {
+  const suggestion = event.target.dataset.suggestion;
+  if (suggestion) acceptSuggestion(JSON.parse(suggestion));
 });
 
 if (state.user) {

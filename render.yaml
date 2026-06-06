@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: growloop
+    runtime: python
+    buildCommand: ""
+    startCommand: "python backend/server.py"
+    healthCheckPath: /api/health
+    envVars:
+      - key: GROWLOOP_DB_PATH
+        value: /var/data/growloop.sqlite3
+    disk:
+      name: growloop-data
+      mountPath: /var/data
+      sizeGB: 1

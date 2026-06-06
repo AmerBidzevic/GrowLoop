@@ -13,6 +13,7 @@ from services import (
     AnalyticsService,
     AuthService,
     HabitService,
+    RecommendationEngine,
     enrich_profile,
 )
 
@@ -29,6 +30,7 @@ class GrowLoopHandler(BaseHTTPRequestHandler):
     habit_service = HabitService(repo)
     analytics_service = AnalyticsService(repo)
     achievement_service = AchievementService(repo)
+    recommendation_engine = RecommendationEngine()
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -92,6 +94,23 @@ class GrowLoopHandler(BaseHTTPRequestHandler):
             self.send_json(self.achievement_service.list_with_locked(user_id))
             return
 
+        if path == "/api/recommendations":
+            user_id = self.require_user_id()
+            if user_id is None:
+                return
+            habits = self.habit_service.list_habits(user_id, include_inactive=True)
+            completions = self.repo.list_completions(user_id, limit=100)
+            onboarding = self.repo.get_onboarding(user_id)
+            self.send_json(self.recommendation_engine.dashboard(onboarding, habits, completions))
+            return
+
+        if path == "/api/notification-preferences":
+            user_id = self.require_user_id()
+            if user_id is None:
+                return
+            self.send_json(self.repo.get_notification_preferences(user_id))
+            return
+
         self.send_error_json(404, "API route not found")
 
     def handle_api_write(self, method):
@@ -121,6 +140,13 @@ class GrowLoopHandler(BaseHTTPRequestHandler):
             self.send_json(user)
             return
 
+        if path == "/api/logout" and method == "POST":
+            token = self.get_session_token()
+            if token:
+                self.repo.delete_session(token)
+            self.send_json({"message": "Logged out"})
+            return
+
         if path == "/api/onboarding" and method == "POST":
             user_id = self.require_user_id()
             if user_id is None:
@@ -129,7 +155,8 @@ class GrowLoopHandler(BaseHTTPRequestHandler):
                 self.send_error_json(400, "All onboarding questions are required")
                 return
             self.repo.save_onboarding(user_id, data["goals"], data["schedule"], data["habit_count"])
-            self.send_json({"message": "Onboarding saved"})
+            suggestions = self.recommendation_engine.suggestions(self.repo.get_onboarding(user_id))
+            self.send_json({"message": "Onboarding saved", "suggestions": suggestions})
             return
 
         if path == "/api/habits" and method == "POST":
@@ -196,14 +223,38 @@ class GrowLoopHandler(BaseHTTPRequestHandler):
             self.send_json({"message": "Habit deleted"})
             return
 
+        if path == "/api/notification-preferences" and method == "PUT":
+            user_id = self.require_user_id()
+            if user_id is None:
+                return
+            self.send_json(self.repo.update_notification_preferences(user_id, data))
+            return
+
         self.send_error_json(404, "API route not found")
 
     def require_user_id(self):
+        token = self.get_session_token()
+        if token:
+            user = self.repo.find_session_user(token)
+            if user:
+                return user["id"]
+
+        # Backward-compatible fallback for local tests and earlier release branches.
         raw_user_id = self.headers.get("X-User-Id")
-        if not raw_user_id or not raw_user_id.isdigit():
+        if raw_user_id and raw_user_id.isdigit():
+            return int(raw_user_id)
+
+        if not token:
             self.send_error_json(401, "Authentication required")
             return None
-        return int(raw_user_id)
+        self.send_error_json(401, "Session expired or invalid")
+        return None
+
+    def get_session_token(self):
+        auth_header = self.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            return auth_header.removeprefix("Bearer ").strip()
+        return self.headers.get("X-Session-Token", "").strip()
 
     def read_json_body(self):
         length = int(self.headers.get("Content-Length", "0"))

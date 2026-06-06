@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+import secrets
 
 from database import hash_password, verify_password
 from repository import GrowLoopRepository
@@ -26,7 +27,12 @@ class AuthService:
         if not user or not verify_password(password, user["password_hash"], user["password_salt"]):
             return None
         profile = self.repo.get_user(user["id"])
-        return enrich_profile(profile)
+        token = secrets.token_urlsafe(32)
+        expires_at = (date.today() + timedelta(days=7)).isoformat() + " 23:59:59"
+        self.repo.create_session(user["id"], token, expires_at)
+        profile = enrich_profile(profile)
+        profile["session_token"] = token
+        return profile
 
 
 class HabitService:

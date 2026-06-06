@@ -64,10 +64,12 @@ class GrowLoopApiTests(unittest.TestCase):
         raise RuntimeError(f"Server failed to start\nSTDOUT: {stdout}\nSTDERR: {stderr}")
 
     @classmethod
-    def request(cls, path, method="GET", payload=None, user_id=None):
+    def request(cls, path, method="GET", payload=None, user_id=None, token=None):
         body = None if payload is None else json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(cls.base_url + path, data=body, method=method)
         request.add_header("Content-Type", "application/json")
+        if token:
+            request.add_header("Authorization", f"Bearer {token}")
         if user_id:
             request.add_header("X-User-Id", str(user_id))
         try:
@@ -86,9 +88,10 @@ class GrowLoopApiTests(unittest.TestCase):
         self.assertEqual(status, 201)
         status, user = self.request("/api/login", "POST", {"email": email, "password": "Secret123!"})
         self.assertEqual(status, 200)
+        self.assertIn("session_token", user)
         return user
 
-    def create_habit(self, user_id, name="Read"):
+    def create_habit(self, user, name="Read"):
         status, habit = self.request(
             "/api/habits",
             "POST",
@@ -101,7 +104,7 @@ class GrowLoopApiTests(unittest.TestCase):
                 "difficulty": "Easy",
                 "reminder": "07:55",
             },
-            user_id,
+            token=user["session_token"],
         )
         self.assertEqual(status, 201)
         return habit["id"]
@@ -109,13 +112,15 @@ class GrowLoopApiTests(unittest.TestCase):
     def test_registration_login_and_profile(self):
         user = self.create_user("auth")
         self.assertEqual(user["level"], 1)
-        status, profile = self.request("/api/profile", user_id=user["id"])
+        status, profile = self.request("/api/profile", token=user["session_token"])
         self.assertEqual(status, 200)
         self.assertEqual(profile["email"], "userauth@growloop.test")
+        status, _payload = self.request("/api/profile")
+        self.assertEqual(status, 401)
 
     def test_habit_crud_and_pause_resume(self):
         user = self.create_user("crud")
-        habit_id = self.create_habit(user["id"])
+        habit_id = self.create_habit(user)
         status, _payload = self.request(
             f"/api/habits/{habit_id}",
             "PUT",
@@ -128,41 +133,64 @@ class GrowLoopApiTests(unittest.TestCase):
                 "difficulty": "Medium",
                 "reminder": "08:00",
             },
-            user["id"],
+            token=user["session_token"],
         )
         self.assertEqual(status, 200)
-        status, _payload = self.request(f"/api/habits/{habit_id}/pause", "POST", {}, user["id"])
+        status, _payload = self.request(f"/api/habits/{habit_id}/pause", "POST", {}, token=user["session_token"])
         self.assertEqual(status, 200)
-        status, habits = self.request("/api/habits?include_inactive=1", user_id=user["id"])
+        status, habits = self.request("/api/habits?include_inactive=1", token=user["session_token"])
         self.assertFalse(habits[0]["is_active"])
-        status, _payload = self.request(f"/api/habits/{habit_id}/resume", "POST", {}, user["id"])
+        status, _payload = self.request(f"/api/habits/{habit_id}/resume", "POST", {}, token=user["session_token"])
         self.assertEqual(status, 200)
-        status, _payload = self.request(f"/api/habits/{habit_id}", "DELETE", user_id=user["id"])
+        status, _payload = self.request(f"/api/habits/{habit_id}", "DELETE", token=user["session_token"])
         self.assertEqual(status, 200)
 
     def test_completion_awards_xp_and_achievement(self):
         user = self.create_user("xp")
-        habit_id = self.create_habit(user["id"])
-        status, result = self.request(f"/api/habits/{habit_id}/complete", "POST", {}, user["id"])
+        habit_id = self.create_habit(user)
+        status, result = self.request(f"/api/habits/{habit_id}/complete", "POST", {}, token=user["session_token"])
         self.assertEqual(status, 200)
         self.assertEqual(result["xp"], 10)
-        status, achievements = self.request("/api/achievements", user_id=user["id"])
+        status, achievements = self.request("/api/achievements", token=user["session_token"])
         self.assertEqual(status, 200)
         self.assertTrue(any(item["code"] == "FIRST_STEP" and item["unlocked"] for item in achievements))
 
-    def test_analytics(self):
+    def test_analytics_and_recommendations(self):
         user = self.create_user("smart")
         self.request(
             "/api/onboarding",
             "POST",
             {"goals": "Health", "schedule": "Morning focused", "habit_count": 2},
-            user["id"],
+            token=user["session_token"],
         )
-        habit_id = self.create_habit(user["id"], "Walk")
-        self.request(f"/api/habits/{habit_id}/complete", "POST", {}, user["id"])
-        status, analytics = self.request("/api/analytics", user_id=user["id"])
+        habit_id = self.create_habit(user, "Walk")
+        self.request(f"/api/habits/{habit_id}/complete", "POST", {}, token=user["session_token"])
+        status, analytics = self.request("/api/analytics", token=user["session_token"])
         self.assertEqual(status, 200)
         self.assertEqual(analytics["total_completions"], 1)
+        status, recommendations = self.request("/api/recommendations", token=user["session_token"])
+        self.assertEqual(status, 200)
+        self.assertGreaterEqual(len(recommendations["habit_suggestions"]), 1)
+
+    def test_notification_preferences(self):
+        user = self.create_user("settings")
+        status, prefs = self.request("/api/notification-preferences", token=user["session_token"])
+        self.assertEqual(status, 200)
+        self.assertEqual(prefs["habit_reminders"], 1)
+        status, updated = self.request(
+            "/api/notification-preferences",
+            "PUT",
+            {
+                "habit_reminders": False,
+                "inactivity_alerts": True,
+                "weekly_summary": False,
+                "monthly_summary": True,
+            },
+            token=user["session_token"],
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(updated["habit_reminders"], 0)
+        self.assertEqual(updated["monthly_summary"], 1)
 
 
 if __name__ == "__main__":
