@@ -120,13 +120,14 @@ async function login(event) {
 
 async function saveOnboarding(event) {
   event.preventDefault();
+  const form = event.currentTarget;
   try {
     const result = await api("/api/onboarding", {
       method: "POST",
       body: JSON.stringify(formToJson(event.currentTarget)),
     });
     dashboardMessage.textContent = result.message;
-    event.currentTarget.reset();
+    form.reset();
     switchView("smart");
   } catch (error) {
     dashboardMessage.textContent = error.message;
